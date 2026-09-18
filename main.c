@@ -8,27 +8,34 @@
 
 #define SCREEN_WIDTH 640
 #define SCREEN_HEIGHT 360
+#define SCALE 2.5
+
+/* #define WINDOW_WIDTH 1900 */
+/* #define WINDOW_HEIGHT 1100 */
+#define WINDOW_WIDTH (SCREEN_WIDTH * SCALE)
+#define WINDOW_HEIGHT (SCREEN_HEIGHT * SCALE)
+
 #define TILESIZE 16
 /* #define TILES_X (SCREEN_WIDTH / TILESIZE) */
 /* #define TILES_Y ((SCREEN_HEIGHT / TILESIZE) - 2) */
 #define TILES_X 40
-#define TILES_Y 20
+#define TILES_Y 40
 
 #define TILESHEET_WIDTH 49
 #define TILESHEET_HEIGHT 22
 #define TILESHEET_GAP 1
 
-#define LEVEL_MIN_ROOMS 10
+#define LEVEL_MIN_ROOMS 20
 #define LEVEL_MAX_ROOMS 500
 #define LEVEL_TILES_TOTAL (TILES_X * TILES_Y)
 #define MAX_LEVELS 10
-#define LEVEL_MIN_ENEMIES 2
-#define LEVEL_MAX_ENEMIES 4
+#define LEVEL_MIN_ENEMIES 6
+#define LEVEL_MAX_ENEMIES 12
 
-#define ROOM_MIN_WIDTH 4
-#define ROOM_MAX_WIDTH 10
-#define ROOM_MIN_HEIGHT 4
-#define ROOM_MAX_HEIGHT 10
+#define ROOM_MIN_WIDTH 2
+#define ROOM_MAX_WIDTH 14
+#define ROOM_MIN_HEIGHT 2
+#define ROOM_MAX_HEIGHT 14
 #define ROOM_MIN_ENEMIES 0
 #define ROOM_MAX_ENEMIES 2
 
@@ -48,10 +55,17 @@
 #define TILE_PLAYER_YELLOW 410
 #define TILE_PLAYER_GREEN 459
 
-#define SCALE 2.5
-
 #define MOVE_SPEED 10.0f
 #define FOV_RADIUS 10
+
+#define VIEW_WIDTH (SCREEN_WIDTH * SCALE)
+#define VIEW_HEIGHT (SCREEN_HEIGHT * SCALE)
+
+typedef struct Camera
+{
+    float x;
+    float y;
+} Camera;
 
 typedef struct Tile
 {
@@ -99,6 +113,13 @@ typedef enum
     BAT = 2,
 } EnemyType;
 
+typedef enum
+{
+    IDLE,
+    CHASING,
+    ATTACKING,
+} EnemyState;
+
 typedef struct Enemy
 {
     EnemyType type;
@@ -117,6 +138,10 @@ typedef struct Enemy
     bool is_hit;
     float hit_timer;
     float hit_duration;
+
+    int attacking_phase;
+    
+    EnemyState state;
 } Enemy;
 
 typedef struct Level
@@ -135,10 +160,14 @@ typedef struct Game
     bool running;
     Level levels[MAX_LEVELS];
     int current_level;
+    int turn;
+    bool turn_taken;
 } Game;
 // structs
 
 int rand_in_range(int min, int max);
+int rand_between(int a, int b);
+bool rand_true_or_false();
 void insertion_sort_int(int arr[], int size);
 float lerp(float a, float b, float t);
 
@@ -149,6 +178,8 @@ int tile_get_index(int x, int y);
 int tile_get_player(Level* level);
 bool tile_is_in_bounds(int x, int y);
 void tileset_create(SDL_Rect* tileset);
+
+void camera_update(Level* level, float dt);
 
 void level_create(void);
 void level_set_tile(Level* level, int x, int y, int tileset_index);
@@ -182,10 +213,12 @@ void fov_clear(Level* level);
 bool enemy_create(Level* level);
 void enemy_draw(Level* level, Enemy* enemy);
 void enemy_take_damage(Level* level, int enemy_index);
+void enemy_update(Level* level, Enemy* enemy);
 // funcs
 
 Game game;
 Player player;
+Camera camera;
 SDL_Texture* spritesheet;
 SDL_Texture* spritesheet_transparent;
 SDL_Rect tileset[TILESHEET_WIDTH * TILESHEET_HEIGHT];
@@ -218,9 +251,13 @@ int main(int argc, char** argv)
     tileset_create(tileset_transparent);
     level_create();
     game.current_level = 0;
+    game.turn = 0;
+    game.turn_taken = false;
     Level* level = &game.levels[game.current_level];
     player_init(&player);
     player_set_pos_tile(level_get_tile_index(level, TILE_STAIRS_UP));
+    camera.x = 0.0f;
+    camera.y = 0.0f;
     fov_make(level);
 
     Uint32 frame_start;
@@ -284,33 +321,68 @@ int main(int argc, char** argv)
                             player_move(level, 1, 1);
                             break;
                         }
-                        if (event.key.keysym.sym == SDLK_PERIOD && event.key.keysym.mod & KMOD_SHIFT && tile_get_player(level) == TILE_STAIRS_DOWN)
+                        if ((event.key.keysym.sym == SDLK_SPACE || event.key.keysym.sym == SDLK_RETURN) && (tile_get_player(level) == TILE_STAIRS_UP || tile_get_player(level) == TILE_STAIRS_DOWN))
                         {
-                            if (game.current_level + 1 < MAX_LEVELS)
+                            if (tile_get_player(level) == TILE_STAIRS_UP)
                             {
-                                game.current_level++;
+                                if (game.current_level - 1 >= 0)
+                                {
+                                    game.current_level--;
+                                }
+                                else
+                                {
+                                    game.running = false;
+                                }
+
+                                level = &game.levels[game.current_level];
+                                player_set_pos_tile(level_get_tile_index(level, TILE_STAIRS_DOWN));
+                                fov_make(level);
                             }
-                            else
+                            else if (tile_get_player(level) == TILE_STAIRS_DOWN)
                             {
-                                game.running = false;
+                                if (game.current_level + 1 < MAX_LEVELS)
+                                {
+                                    game.current_level++;
+                                }
+                                else
+                                {
+                                    game.running = false;
+                                }
+
+                                level = &game.levels[game.current_level];
+                                player_set_pos_tile(level_get_tile_index(level, TILE_STAIRS_UP));
+                                fov_make(level);
                             }
-                            level = &game.levels[game.current_level];
-                            player_set_pos_tile(level_get_tile_index(level, TILE_STAIRS_UP));
-                            fov_make(level);
                         }
-                        if (event.key.keysym.sym == SDLK_COMMA && event.key.keysym.mod & KMOD_SHIFT && tile_get_player(level) == TILE_STAIRS_UP)
-                        {
-                            if (game.current_level - 1 >= 0)
-                            {
-                                game.current_level--;
-                            }
-                            else
-                            {
-                                game.running = false;
-                            }
-                            level = &game.levels[game.current_level];
-                            player_set_pos_tile(level_get_tile_index(level, TILE_STAIRS_DOWN));
-                        }
+                        /* if (event.key.keysym.sym == SDLK_PERIOD && event.key.keysym.mod & KMOD_SHIFT && tile_get_player(level) == TILE_STAIRS_DOWN) */
+                        /* { */
+                        /*     if (game.current_level + 1 < MAX_LEVELS) */
+                        /*     { */
+                        /*         game.current_level++; */
+                        /*     } */
+                        /*     else */
+                        /*     { */
+                        /*         game.running = false; */
+                        /*     } */
+                        /*     level = &game.levels[game.current_level]; */
+                        /*     player_set_pos_tile(level_get_tile_index(level, TILE_STAIRS_UP)); */
+                        /*     fov_make(level); */
+                        /* } */
+                        /* if (event.key.keysym.sym == SDLK_COMMA && event.key.keysym.mod & KMOD_SHIFT && tile_get_player(level) == TILE_STAIRS_UP) */
+                        /* { */
+                        /*     if (game.current_level - 1 >= 0) */
+                        /*     { */
+                        /*         game.current_level--; */
+                        /*     } */
+                        /*     else */
+                        /*     { */
+                        /*         game.running = false; */
+                        /*     } */
+                        /*     level = &game.levels[game.current_level]; */
+                        /*     player_set_pos_tile(level_get_tile_index(level, TILE_STAIRS_DOWN)); */
+                        /* } */
+
+                        game.turn++;
                     }
                 default: break;
             }
@@ -318,48 +390,15 @@ int main(int argc, char** argv)
 
         SDL_RenderClear(game.renderer);
 
-        if (player.is_moving)
-        {
-            player.move_progress += MOVE_SPEED * dt;
-
-            if (player.attacking_phase == 1)
-            {
-                if (player.move_progress >= 1.0f)
-                {
-                    player.attacking_phase = 2;
-                    float temp_x = player.start_x;
-                    float temp_y = player.start_y;
-                    player.start_x = player.target_x;
-                    player.start_y = player.target_y;
-                    player.target_x = temp_x;
-                    player.target_y = temp_y;
-                    player.move_progress = 0.0f;
-                }
-            }
-            else if (player.attacking_phase == 2)
-            {
-                if (player.move_progress >= 1.0f)
-                {
-                    player.x = (int)player.target_x;
-                    player.y = (int)player.target_y;
-                    player.is_moving = false;
-                    player.move_progress = 0.0f;
-                    player.attacking_phase = 0;
-                }
-            }
-            else if (player.move_progress >= 1.0f)
-            {
-                player.move_progress = 0.0f;
-                player.is_moving = false;
-            }
-        }
-
         level_update(level, dt);
+        camera_update(level, dt);
 
         level_draw(level);
         player_draw(level);
 
         SDL_RenderPresent(game.renderer);
+
+        game.turn_taken = false;
 
         dt = (SDL_GetTicks() - frame_start) / 1000.0f;
     }
@@ -376,6 +415,34 @@ int rand_in_range(int min, int max)
 {
     int n = rand() % (max - min + 1) + min;
     return n;
+}
+
+int rand_between(int a, int b)
+{
+    int n = rand_in_range(0, 1);
+    
+    if (n == 0)
+    {
+        return a;
+    }
+    else
+    {
+        return b;
+    }
+}
+
+bool rand_true_or_false()
+{
+    int n = rand_in_range(0, 1);
+    
+    if (n == 0)
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
 }
 
 void insertion_sort_int(int arr[], int size)
@@ -453,7 +520,7 @@ bool sdl_init(Game* game)
         return false;
     }
 
-    game->window = SDL_CreateWindow("asdf", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_WIDTH * SCALE,  SCREEN_HEIGHT * SCALE, SDL_WINDOW_SHOWN);
+    game->window = SDL_CreateWindow("asdf", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH,  WINDOW_HEIGHT, SDL_WINDOW_SHOWN);
     if (!game->window)
     {
         fprintf(stderr, "Couldn't initialize SDL_Window! SDL_Error: %s\n", SDL_GetError());
@@ -520,6 +587,57 @@ void tileset_create(SDL_Rect* tileset)
     }
 }
 
+void camera_update(Level* level, float dt)
+{
+    float tilesize = TILESIZE * SCALE;
+
+    float target_x = player.x * tilesize + tilesize / 2.0f - VIEW_WIDTH / 2.0f;
+    float target_y = player.y * tilesize + tilesize / 2.0f - VIEW_HEIGHT / 2.0f;
+
+    float map_width = TILES_X * tilesize;
+    float map_height = TILES_Y * tilesize;
+
+    float max_x = map_width - SCREEN_WIDTH;
+    float max_y = map_height - SCREEN_HEIGHT;
+
+    if (target_x < 0)
+    {
+        target_x = 0;
+    }
+    if (target_x > max_x)
+    {
+        target_x = max_x;
+    }
+    if (target_y < 0)
+    {
+        target_y = 0;
+    }
+    if (target_y > max_y)
+    {
+        target_y = max_y;
+    }
+
+    camera.x = lerp(camera.x, target_x, MOVE_SPEED * dt);
+    camera.y = lerp(camera.y, target_y, MOVE_SPEED * dt);
+
+    if (camera.x < 0)
+    {
+        camera.x = 0;
+    }
+    if (camera.x > max_x)
+    {
+        camera.x = max_x;
+    }
+    if (camera.y < 0)
+    {
+        camera.y = 0;
+    }
+    if (camera.y > max_y)
+    {
+        camera.y = max_y;
+    }
+}
+
 void level_create(void)
 {
     for (int i = 0; i < MAX_LEVELS; ++i)
@@ -537,7 +655,7 @@ void level_create(void)
                 level->tiles[tile_index].tileset_index = TILE_WALL;
                 level->tiles[tile_index].blocked = true;
                 level->tiles[tile_index].transparent = false;
-                //map
+                //showalltiles displayalltiles
                 level->tiles[tile_index].visible = false;
                 level->tiles[tile_index].seen = false;
                 level->tiles[tile_index].has_enemy = false;
@@ -571,9 +689,66 @@ void level_set_tile(Level* level, int x, int y, int tileset_index)
 
 void level_update(Level* level, float dt)
 {
+
+    if (player.is_moving)
+    {
+        player.move_progress += MOVE_SPEED * dt;
+
+        if (player.attacking_phase == 1)
+        {
+            if (player.move_progress >= 1.0f)
+            {
+                player.attacking_phase = 2;
+                float temp_x = player.start_x;
+                float temp_y = player.start_y;
+                player.start_x = player.target_x;
+                player.start_y = player.target_y;
+                player.target_x = temp_x;
+                player.target_y = temp_y;
+                player.move_progress = 0.0f;
+            }
+        }
+        else if (player.attacking_phase == 2)
+        {
+            if (player.move_progress >= 1.0f)
+            {
+                player.x = (int)player.target_x;
+                player.y = (int)player.target_y;
+                player.is_moving = false;
+                player.move_progress = 0.0f;
+                player.attacking_phase = 0;
+
+                game.turn_taken = true;
+            }
+        }
+        else if (player.move_progress >= 1.0f)
+        {
+            player.move_progress = 0.0f;
+            player.is_moving = false;
+
+            game.turn_taken = true;
+        }
+    }
+
     for (int i = 0; i < level->num_enemies; ++i)
     {
         Enemy* enemy = &level->enemies[i];
+
+        if (game.turn_taken)
+        {
+            enemy_update(level, enemy);
+        }
+
+        if (enemy->is_moving)
+        {
+            enemy->move_progress += MOVE_SPEED * dt;
+
+            if (enemy->move_progress >= 1.0f)
+            {
+                enemy->move_progress = 0.0f;
+                enemy->is_moving = false;
+            }
+        }
 
         enemy_draw(level, enemy);
 
@@ -591,27 +766,55 @@ void level_update(Level* level, float dt)
 
 void level_draw(Level* level)
 {
-    for (int i = 0; i < LEVEL_TILES_TOTAL; ++i)
+    float tilesize = TILESIZE * SCALE;
+
+    int start_x = (int)(camera.x / tilesize);
+    int start_y = (int)(camera.y / tilesize);
+
+    int end_x = (int)((camera.x + VIEW_WIDTH) / tilesize) + 1;
+    int end_y = (int)((camera.y + VIEW_HEIGHT) / tilesize) + 1;
+
+    if (start_x < 0)
     {
-        Tile t = level->tiles[i];
-        /* bool player_here = (t.x == player.x && t.y == player.y); */
+        start_x = 0;
+    }
+    if (end_x >= TILES_X)
+    {
+        end_x = TILES_X - 1;
+    }
+    if (start_y < 0)
+    {
+        start_y = 0;
+    }
+    if (end_y >= TILES_Y)
+    {
+        end_y = TILES_Y - 1;
+    }
 
-        if (t.visible)
+    for (int x = start_x; x <= end_x; ++x)
+    {
+        for (int y = start_y; y <= end_y; ++y)
         {
-            SDL_SetTextureColorMod(spritesheet, 255, 255, 255);
-            /* SDL_SetTextureAlphaMod(spritesheet, (player_here && !(t.tileset_index == TILE_FLOOR)) ? 250 : 255); */
-            SDL_SetTextureAlphaMod(spritesheet, 255);
+            Tile t = level->tiles[tile_get_index(x, y)];
+            /* bool player_here = (t.x == player.x && t.y == player.y); */
 
-            SDL_Rect dstRect = (SDL_Rect){t.x * TILESIZE * SCALE, t.y * TILESIZE * SCALE, TILESIZE * SCALE, TILESIZE * SCALE};
-            SDL_RenderCopy(game.renderer, spritesheet, &t.src, &dstRect);
-        }
-        else if (t.seen)
-        {
-            SDL_SetTextureColorMod(spritesheet, 100, 100, 100);
-            SDL_SetTextureAlphaMod(spritesheet, 160);
+            if (t.visible)
+            {
+                SDL_SetTextureColorMod(spritesheet, 255, 255, 255);
+                /* SDL_SetTextureAlphaMod(spritesheet, (player_here && !(t.tileset_index == TILE_FLOOR)) ? 250 : 255); */
+                SDL_SetTextureAlphaMod(spritesheet, 255);
 
-            SDL_Rect dstRect = (SDL_Rect){t.x * TILESIZE * SCALE, t.y * TILESIZE * SCALE, TILESIZE * SCALE, TILESIZE * SCALE};
-            SDL_RenderCopy(game.renderer, spritesheet, &t.src, &dstRect);
+                SDL_Rect dstRect = (SDL_Rect){t.x * TILESIZE * SCALE - camera.x, t.y * TILESIZE * SCALE - camera.y, TILESIZE * SCALE, TILESIZE * SCALE};
+                SDL_RenderCopy(game.renderer, spritesheet, &t.src, &dstRect);
+            }
+            else if (t.seen)
+            {
+                SDL_SetTextureColorMod(spritesheet, 100, 100, 100);
+                SDL_SetTextureAlphaMod(spritesheet, 160);
+
+                SDL_Rect dstRect = (SDL_Rect){t.x * TILESIZE * SCALE - camera.x, t.y * TILESIZE * SCALE - camera.y, TILESIZE * SCALE, TILESIZE * SCALE};
+                SDL_RenderCopy(game.renderer, spritesheet, &t.src, &dstRect);
+            }
         }
     }
 
@@ -625,7 +828,7 @@ void level_set_rooms(Level* level)
 {
     level->num_rooms = rand_in_range(LEVEL_MIN_ROOMS, LEVEL_MAX_ROOMS);
     int rooms_placed = 0;
-    int max_attempts = 5000;
+    int max_attempts = 10000;
 
     while (rooms_placed < level->num_rooms && max_attempts > 0)
     {
@@ -926,7 +1129,7 @@ void player_draw(Level* level)
     SDL_SetTextureColorMod(spritesheet_transparent, 255, 255, 255);
     SDL_SetTextureAlphaMod(spritesheet_transparent, 255);
 
-    SDL_Rect dst = (SDL_Rect){draw_x * TILESIZE * SCALE, draw_y * TILESIZE * SCALE, TILESIZE * SCALE, TILESIZE * SCALE};
+    SDL_Rect dst = (SDL_Rect){draw_x * TILESIZE * SCALE - camera.x, draw_y * TILESIZE * SCALE - camera.y, TILESIZE * SCALE, TILESIZE * SCALE};
     SDL_RenderCopy(game.renderer, spritesheet_transparent, &player.src, &dst);
 }
 
@@ -1147,48 +1350,52 @@ bool enemy_create(Level* level)
     
     Room* r = &level->rooms[rand_room];
     Enemy e;
-    bool full = true;
-    //TODO: add max_attempts logic
-    while (full)
+    for (int attempt = 0; attempt < 100; ++attempt)
     {
         e.type = rand_in_range(RAT, BAT);
 
-        if ((r->num_enemies + e.type) <= r->max_enemies)
+        if ((r->num_enemies + e.type) > r->max_enemies)
         {
-            int rand_x = rand_in_range(r->x, r->x + r->w - 1);
-            int rand_y = rand_in_range(r->y, r->y + r->h - 1);
-            int tile = tile_get_index(rand_x, rand_y);
-            while (level->tiles[tile].has_enemy)
-            {
-                rand_x = rand_in_range(r->x, r->x + r->w - 1);
-                rand_y = rand_in_range(r->y, r->y + r->h - 1);
-            }
-            e.x = rand_x;
-            e.y = rand_y;
-            e.is_moving = false;
-            switch (e.type)
-            {
-                case RAT:
-                    e.src = tileset_transparent[TILE_RAT];
-                    e.health = rand_in_range(8, 16);
-                    break;
-                case BAT:
-                    e.src = tileset_transparent[TILE_BAT];
-                    e.health = rand_in_range(11, 24);
-                    break;
-                default: break;
-            }
-
-            r->num_enemies += e.type;
-            full = false;
+            continue;
         }
+
+        int rand_x = rand_in_range(r->x, r->x + r->w - 1);
+        int rand_y = rand_in_range(r->y, r->y + r->h - 1);
+        int tile = tile_get_index(rand_x, rand_y);
+
+        if (level->tiles[tile].has_enemy)
+        {
+            continue;
+        }
+
+        e.x = rand_x;
+        e.y = rand_y;
+        e.is_moving = false;
+        e.state = IDLE;
+
+        switch (e.type)
+        {
+            case RAT:
+                e.src = tileset_transparent[TILE_RAT];
+                e.health = rand_in_range(8, 16);
+                break;
+            case BAT:
+                e.src = tileset_transparent[TILE_BAT];
+                e.health = rand_in_range(11, 24);
+                break;
+            default: break;
+        }
+
+        r->num_enemies += e.type;
+
+        level->enemies[level->num_enemies] = e;
+        level->num_enemies++;
+        level->tiles[tile_get_index(e.x, e.y)].has_enemy = true;
+
+        return true;
     }
 
-    level->enemies[level->num_enemies] = e;
-    level->num_enemies++;
-    level->tiles[tile_get_index(e.x, e.y)].has_enemy = true;
-
-    return true;
+    return false;
 }
 
 void enemy_draw(Level* level, Enemy* enemy)
@@ -1232,7 +1439,7 @@ void enemy_draw(Level* level, Enemy* enemy)
             SDL_SetTextureAlphaMod(spritesheet_transparent, 255);
         }
 
-        SDL_Rect dst = (SDL_Rect){draw_x * TILESIZE * SCALE, draw_y * TILESIZE * SCALE, TILESIZE * SCALE, TILESIZE * SCALE};
+        SDL_Rect dst = (SDL_Rect){draw_x * TILESIZE * SCALE - camera.x, draw_y * TILESIZE * SCALE - camera.y, TILESIZE * SCALE, TILESIZE * SCALE};
         SDL_RenderCopy(game.renderer, spritesheet_transparent, &enemy->src, &dst);
     }
 }
@@ -1254,5 +1461,85 @@ void enemy_take_damage(Level* level, int enemy_index)
             level->enemies[i] = level->enemies[i + 1];
         }
         level->num_enemies--;
+    }
+}
+
+void enemy_update(Level* level, Enemy* enemy)
+{
+    switch (enemy->state)
+    {
+        case IDLE:
+            bool move_or_not = rand_true_or_false();
+
+            if (move_or_not)
+            {
+                int max_retries = 8;
+
+                for (int attempt = 0; attempt < max_retries; attempt++)
+                {
+                    int direction = rand_in_range(0, 3);
+                    int dx = 0;
+                    int dy = 0;
+
+                    switch (direction)
+                    {
+                        case 0: dx = 1; break;
+                        case 1: dx = -1; break;
+                        case 2: dy = 1; break;
+                        case 3: dy = -1; break;
+                    }
+
+                    /* int dx = rand_between(-1, 1); */
+                    /* int dy = rand_between(-1, 1); */
+
+                    /* if (dx == 0 && dy == 0) */
+                    /* { */
+                    /*     continue; */
+                    /* } */
+
+                    int new_x = enemy->x + dx;
+                    int new_y = enemy->y + dy;
+
+                    if (!tile_is_in_bounds(new_x, new_y))
+                    {
+                        continue;
+                    }
+
+                    int new_pos = tile_get_index(new_x, new_y);
+
+                    if (level->tiles[new_pos].has_enemy ||
+                            tile_get_index(player.x, player.y) == new_pos ||
+                            level->tiles[new_pos].blocked)
+                    {
+                        continue;
+                    }
+
+                    int curr_pos = tile_get_index(enemy->x, enemy->y);
+
+                    level->tiles[curr_pos].has_enemy = false;
+                    level->tiles[new_pos].has_enemy = true;
+
+                    enemy->start_x = enemy->x;
+                    enemy->start_y = enemy->y;
+                    enemy->target_x = new_x;
+                    enemy->target_y = new_y;
+
+                    enemy->x = new_x;
+                    enemy->y = new_y;
+
+                    enemy->is_moving = true;
+                    enemy->move_progress = 0.0f;
+                    enemy->attacking_phase = 0;
+
+                    break;
+                }
+            }
+            break;
+        case CHASING:
+            break;
+        case ATTACKING:
+            break;
+        default:
+            break;
     }
 }

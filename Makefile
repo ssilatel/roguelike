@@ -1,5 +1,5 @@
 build:
-	gcc main.c -lSDL2 -lSDL2_image
+	gcc main.c -lSDL2 -lSDL2_image -lm
 
 dev:
 	gcc -Wall -Werror -pedantic main.c -lSDL2 -lSDL2_image
