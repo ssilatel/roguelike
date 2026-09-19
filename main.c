@@ -50,6 +50,13 @@
 #define TILE_STAIRS_DOWN 297
 #define TILE_BAT 418
 #define TILE_RAT 423
+#define TILE_SPIDER 275
+#define TILE_TREE_VARIANT_1 49
+#define TILE_TREE_VARIANT_2 50
+#define TILE_TREE_VARIANT_3 51
+#define TILE_TREE_VARIANT_4 52
+#define TILE_TREE_VARIANT_5 53
+#define TILE_TREE_VARIANT_6 54
 
 #define TILE_PLAYER_BLUE 361
 #define TILE_PLAYER_YELLOW 410
@@ -109,8 +116,9 @@ typedef struct Player
 
 typedef enum
 {
-    RAT = 1,
-    BAT = 2,
+    SPIDER = 1,
+    RAT = 2,
+    BAT = 3,
 } EnemyType;
 
 typedef enum
@@ -166,7 +174,7 @@ typedef struct Game
 // structs
 
 int rand_in_range(int min, int max);
-int rand_between(int a, int b);
+int rand_one_of(int a, int b);
 bool rand_true_or_false();
 void insertion_sort_int(int arr[], int size);
 float lerp(float a, float b, float t);
@@ -417,7 +425,7 @@ int rand_in_range(int min, int max)
     return n;
 }
 
-int rand_between(int a, int b)
+int rand_one_of(int a, int b)
 {
     int n = rand_in_range(0, 1);
     
@@ -1352,7 +1360,7 @@ bool enemy_create(Level* level)
     Enemy e;
     for (int attempt = 0; attempt < 100; ++attempt)
     {
-        e.type = rand_in_range(RAT, BAT);
+        e.type = rand_one_of(SPIDER, RAT);
 
         if ((r->num_enemies + e.type) > r->max_enemies)
         {
@@ -1375,12 +1383,12 @@ bool enemy_create(Level* level)
 
         switch (e.type)
         {
-            case RAT:
-                e.src = tileset_transparent[TILE_RAT];
+            case SPIDER:
+                e.src = tileset_transparent[TILE_SPIDER];
                 e.health = rand_in_range(8, 16);
                 break;
-            case BAT:
-                e.src = tileset_transparent[TILE_BAT];
+            case RAT:
+                e.src = tileset_transparent[TILE_RAT];
                 e.health = rand_in_range(11, 24);
                 break;
             default: break;
@@ -1489,8 +1497,8 @@ void enemy_update(Level* level, Enemy* enemy)
                         case 3: dy = -1; break;
                     }
 
-                    /* int dx = rand_between(-1, 1); */
-                    /* int dy = rand_between(-1, 1); */
+                    /* int dx = rand_one_of(-1, 1); */
+                    /* int dy = rand_one_of(-1, 1); */
 
                     /* if (dx == 0 && dy == 0) */
                     /* { */
